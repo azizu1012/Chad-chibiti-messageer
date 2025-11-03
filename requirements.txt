@@ -1,13 +1,10 @@
-discord.py==2.4.0  # Giữ cho reference, nhưng Teams không cần
-python-dotenv==1.0.1
-sympy==1.13.3
-google-generativeai==0.8.3  # Update cho 2025
-requests==2.32.3
-google-search-results==2.4.2  # SerpAPI
-tavily-python==0.5.0
-exa-py==1.0.15  # Update
-flask==3.0.3  # Giữ keep-alive nếu cần
-aiofiles==24.1.0
-aiohttp==3.10.5  # Cho Teams server
-botbuilder-core==4.15.0  # Update cho 2025
-botbuilder-schema==4.15.0  # Cho Teams
+discord.py
+python-dotenv
+sympy
+google-generativeai
+requests
+google-search-results
+tavily-python
+exa-py
+flask
+aiofiles
