@@ -117,10 +117,10 @@ async def run_gemini_api(messages, model_name, user_id, temperature=0.7, max_tok
             
             reply = ""
             for part in response.parts:
-                if "text" in part:
-                    reply += part["text"]
-                elif "function_call" in part:
-                    function_call = part["function_call"]
+                if part.text: # Sử dụng thuộc tính .text để kiểm tra và lấy nội dung
+                    reply += part.text
+                elif part.function_call: # Sử dụng thuộc tính .function_call
+                    function_call = part.function_call
                     tool_result = await call_tool(function_call, user_id)
                     # Thêm tool response vào lịch sử và regenerate
                     gemini_messages.append({"role": "model", "parts": [part]})

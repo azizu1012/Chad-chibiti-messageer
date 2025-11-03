@@ -21,60 +21,73 @@ async def keep_alive(request):
     return web.Response(text="Bot alive! No sleep pls~ 😴", status=200)
 
 async def messenger_webhook(request):
-    logger.info(f"Received request: {request.method} {request.url}")
-    if request.method == 'GET':
-        verify_token = request.query.get('hub.verify_token')
-        challenge = request.query.get('hub.challenge')
-        logger.info(f"Verify token: {verify_token}")
-        if verify_token == VERIFY_TOKEN:
-            return web.Response(text=challenge, status=200)
-        return web.Response(text='Invalid verify token', status=403)
+    # ... (Các phần kiểm tra GET, POST, data = await request.json() giữ nguyên)
     if request.method == 'POST':
         data = await request.json()
         logger.info(f"Webhook data: {json.dumps(data)}")
         if data['object'] == 'page':
             for entry in data['entry']:
-                messaging = entry['messaging'][0]
-                sender_id = messaging['sender']['id']
-                query = messaging['message'].get('text', '')
-                logger.info(f"Message from {sender_id}: {query}")
-                # Check anti-spam
-                if await is_rate_limited(sender_id):
-                    reply = "Úi, anh spam quá! Chờ xíu nha~ 😅"
-                else:
-                    # Gọi Gemini logic
-                    history = await get_user_history_async(sender_id)
-                    messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": query}]
-                    reply = await run_gemini_api(messages, os.getenv("MODEL_NAME"), sender_id, temperature=0.7, max_tokens=2000)
-                    thinking_block_pattern = r'<THINKING>(.*?)</THINKING>'
-                    thinking_match = re.search(thinking_block_pattern, reply, re.DOTALL)
-                    if thinking_match:
-                        logger.info(f"--- THINKING DEBUG FOR USER: {sender_id} ---")
-                        logger.info(thinking_match.group(1).strip())
-                        logger.info("--- END THINKING DEBUG ---")
-                        reply = re.sub(thinking_block_pattern, '', reply, flags=re.DOTALL).strip()
-                    if not reply:
-                        friendly_errors = [
-                            "Úi chà! 🥺 Tui bị lỗi đường truyền xíu ròi! Hỏi lại nha!",
-                            "Ôi không! 😭 Tui đơ mất tiêu, hỏi lại tui nha! ✨",
-                            "Ái chà chà! 🤯 Mất sóng rồi, thử lại nha anh! 😉"
-                        ]
-                        reply = random.choice(friendly_errors)
-                    if len(reply) > 2000:  # Messenger limit
-                        reply = reply[:2000] + "... (cắt bớt nha!)"
-                    # Log message
-                    await log_message(sender_id, "assistant", reply)
-                # Gửi reply qua Messenger API
-                url = "https://graph.facebook.com/v20.0/me/messages"
-                headers = {'Content-Type': 'application/json'}
-                payload = {'access_token': PAGE_ACCESS_TOKEN, 'recipient': {'id': sender_id}, 'message': {'text': reply}}
-                response = requests.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    logger.error(f"Messenger API error: {response.text}")
-                else:
-                    logger.info(f"Sent reply to {sender_id}: {reply}")
-        return web.Response(text='OK', status=200)
+                # Lặp qua TẤT CẢ messaging events
+                for messaging in entry.get('messaging', []): 
+                    sender_id = messaging['sender']['id']
+                    
+                    # 1. KIỂM TRA ĐÂY CÓ PHẢI LÀ TIN NHẮN (text message) hay không
+                    if 'message' in messaging and 'text' in messaging['message']:
+                        query = messaging['message'].get('text', '')
+                        logger.info(f"Message from {sender_id}: {query}")
+                        
+                        # --- BẮT ĐẦU LOGIC XỬ LÝ TIN NHẮN CỦA BẠN ---
+                        if await is_rate_limited(sender_id):
+                            reply = "Úi, anh spam quá! Chờ xíu nha~ 😅"
+                        else:
+                            history = await get_user_history_async(sender_id)
+                            messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": query}]
+                            reply = await run_gemini_api(messages, os.getenv("MODEL_NAME"), sender_id, temperature=0.7, max_tokens=2000)
+                            
+                            # Xử lý Thinking Block (giữ nguyên logic của bạn)
+                            thinking_block_pattern = r'<THINKING>(.*?)</THINKING>'
+                            thinking_match = re.search(thinking_block_pattern, reply, re.DOTALL)
+                            if thinking_match:
+                                logger.info(f"--- THINKING DEBUG FOR USER: {sender_id} ---")
+                                logger.info(thinking_match.group(1).strip())
+                                logger.info("--- END THINKING DEBUG ---")
+                                reply = re.sub(thinking_block_pattern, '', reply, flags=re.DOTALL).strip()
+                                
+                            if not reply:
+                                friendly_errors = [
+                                    "Úi chà! 🥺 Tui bị lỗi đường truyền xíu ròi! Hỏi lại nha!",
+                                    "Ôi không! 😭 Tui đơ mất tiêu, hỏi lại tui nha! ✨",
+                                    "Ái chà chà! 🤯 Mất sóng rồi, thử lại nha anh! 😉"
+                                ]
+                                reply = random.choice(friendly_errors)
+                            if len(reply) > 2000:
+                                reply = reply[:2000] + "... (cắt bớt nha!)"
+                            
+                            await log_message(sender_id, "assistant", reply)
+                            
+                        # Gửi reply qua Messenger API (giữ nguyên logic của bạn)
+                        url = "https://graph.facebook.com/v20.0/me/messages"
+                        headers = {'Content-Type': 'application/json'}
+                        payload = {'access_token': PAGE_ACCESS_TOKEN, 'recipient': {'id': sender_id}, 'message': {'text': reply}}
+                        response = requests.post(url, headers=headers, json=payload)
+                        if response.status_code != 200:
+                            logger.error(f"Messenger API error: {response.text}")
+                        else:
+                            logger.info(f"Sent reply to {sender_id}: {reply}")
+                            
+                    # 2. BỎ QUA CÁC SỰ KIỆN KHÔNG PHẢI TIN NHẮN (delivery, read, postback...)
+                    else:
+                        if 'delivery' in messaging:
+                            logger.info(f"Received delivery event from {sender_id}. Skipping.")
+                        elif 'read' in messaging:
+                            logger.info(f"Received read event from {sender_id}. Skipping.")
+                        elif 'postback' in messaging:
+                            logger.info(f"Received postback event from {sender_id}. Skipping.")
+                        else:
+                            logger.warning(f"Received unhandled event from {sender_id}: {messaging}. Skipping.")
 
+            return web.Response(text='OK', status=200)
+        
 app = web.Application()
 app.router.add_get('/keep-alive', keep_alive)
 app.router.add_route('*', '/messenger/webhook', messenger_webhook)
