@@ -5,7 +5,8 @@ import random
 from datetime import datetime
 from google.generativeai import GenerativeModel
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from config import GEMINI_API_KEYS, MODEL_NAME, logger
+from config import GEMINI_API_KEYS, MODEL_NAME
+from logging_setup import logger
 from tools import ALL_TOOLS, call_tool
 from database import log_message
 

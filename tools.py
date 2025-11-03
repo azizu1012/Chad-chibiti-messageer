@@ -1,8 +1,7 @@
 import asyncio
 import json
 from google.generativeai.types import Tool, FunctionDeclaration
-from config import logger
-from .gemini_api import run_calculator  # Import nếu có (giả định trong gemini_api)
+from logging_setup import logger
 # Giả định get_weather, save_note từ code gốc, anh adjust nếu cần
 async def get_weather(city):
     # Code gốc get_weather ở đây

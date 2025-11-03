@@ -1,6 +1,5 @@
 from collections import defaultdict, deque
-from config import logger
-
+from logging_setup import logger
 user_queue = defaultdict(deque)
 SPAM_THRESHOLD = 3
 SPAM_WINDOW = 30

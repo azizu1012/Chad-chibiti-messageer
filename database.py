@@ -1,7 +1,8 @@
 import os
 import sqlite3
 import asyncio
-from config import DB_PATH, DB_BACKUP_PATH, MEMORY_PATH, memory_lock, weather_lock, logger
+from config import DB_PATH, DB_BACKUP_PATH, MEMORY_PATH
+from logging_setup import logger
 
 # Init DB
 def init_db():
