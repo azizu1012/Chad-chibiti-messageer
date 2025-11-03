@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 import random
-from datetime import datetime  # <-- Đã thêm
+from datetime import datetime
 from aiohttp import web
 from gemini_api import run_gemini_api, system_prompt
 from database import log_message, get_user_history_async, init_db
@@ -11,6 +11,7 @@ import requests
 import json
 from logging_setup import logger
 
+# BẢO ĐẢM init_db được gọi
 init_db()
 
 VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN")
@@ -20,8 +21,29 @@ async def keep_alive(request):
     logger.info("Ping from UptimeRobot or test")
     return web.Response(text="Bot alive! No sleep pls~ 😴", status=200)
 
+# THÊM HANDLER CHO ROUTE GỐC / ĐỂ TRÁNH LỖI 404 KHÔNG RÕ RÀNG
+async def root_handler(request):
+    logger.info("Root path accessed.")
+    return web.Response(text="Bot is running! Use /keep-alive for health check.", status=200)
+
+
 async def messenger_webhook(request):
-    # ... (Các phần kiểm tra GET, POST, data = await request.json() giữ nguyên)
+    logger.info(f"Received request: {request.method} {request.url}")
+    
+    # ------------------------------------------------------------------
+    # KHẮC PHỤC LỖI XÁC MINH WEBHOOK (GET) VÀ LỖI 'NOT FOUND' (404)
+    # ------------------------------------------------------------------
+    if request.method == 'GET':
+        verify_token = request.query.get('hub.verify_token')
+        challenge = request.query.get('hub.challenge')
+        logger.info(f"Verify token: {verify_token}")
+        if verify_token == VERIFY_TOKEN:
+            return web.Response(text=challenge, status=200)
+        logger.warning(f"Invalid verify token received: {verify_token}")
+        return web.Response(text='Invalid verify token', status=403)
+    # ------------------------------------------------------------------
+    
+    # BẮT ĐẦU PHẦN XỬ LÝ TIN NHẮN (POST)
     if request.method == 'POST':
         data = await request.json()
         logger.info(f"Webhook data: {json.dumps(data)}")
@@ -60,6 +82,7 @@ async def messenger_webhook(request):
                                     "Ái chà chà! 🤯 Mất sóng rồi, thử lại nha anh! 😉"
                                 ]
                                 reply = random.choice(friendly_errors)
+                            # Kiểm tra giới hạn 2000 ký tự của Messenger
                             if len(reply) > 2000:
                                 reply = reply[:2000] + "... (cắt bớt nha!)"
                             
@@ -89,6 +112,7 @@ async def messenger_webhook(request):
             return web.Response(text='OK', status=200)
         
 app = web.Application()
+app.router.add_get('/', root_handler) # <-- THÊM ROUTE GỐC (Fix 404)
 app.router.add_get('/keep-alive', keep_alive)
 app.router.add_route('*', '/messenger/webhook', messenger_webhook)
 
