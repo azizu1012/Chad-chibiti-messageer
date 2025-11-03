@@ -2,6 +2,8 @@ import asyncio
 import json
 from google.generativeai.types import Tool, FunctionDeclaration
 from logging_setup import logger
+from config import CITY_NAME_MAP  # <-- Đã di chuyển/thêm vào đây
+
 # Giả định get_weather, save_note từ code gốc, anh adjust nếu cần
 async def get_weather(city):
     # Code gốc get_weather ở đây
@@ -10,6 +12,19 @@ async def get_weather(city):
 async def save_note(note, user_id):
     # Code gốc save_note ở đây
     pass
+
+# Giả định run_search_apis và run_calculator từ code gốc
+async def run_search_apis(query, type):
+    return f"Search result for {query} ({type})" # Placeholder
+
+def run_calculator(equation):
+    try:
+        # Rất nguy hiểm, chỉ dùng nếu bạn kiểm soát input rất chặt
+        # Giả định có thư viện toán học an toàn ở đây
+        import math
+        return eval(equation, {"__builtins__": None}, math.__dict__)
+    except Exception as e:
+        return f"Calculation error: {str(e)}"
 
 ALL_TOOLS = [
     Tool(function_declarations=[
@@ -93,7 +108,7 @@ async def call_tool(function_call, user_id):
         return f"Lỗi tool: {str(e)}"
 
 def normalize_city_name(city_query):
-    from config import CITY_NAME_MAP  # Import nếu cần
+    # from config import CITY_NAME_MAP # đã được di chuyển lên trên
     if not city_query:
         return ("Ho Chi Minh City", "Thành phố Hồ Chí Minh")
     city_key = city_query.strip().lower()

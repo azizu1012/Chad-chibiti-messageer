@@ -4,6 +4,7 @@ import json
 import random
 from datetime import datetime
 from google.generativeai import GenerativeModel
+import google.generativeai as genai # <-- Đã thêm
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from config import GEMINI_API_KEYS, MODEL_NAME
 from logging_setup import logger

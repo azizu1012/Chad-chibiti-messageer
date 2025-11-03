@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import random
+from datetime import datetime  # <-- Đã thêm
 from aiohttp import web
 from gemini_api import run_gemini_api, system_prompt
 from database import log_message, get_user_history_async, init_db
@@ -79,4 +80,15 @@ app.router.add_get('/keep-alive', keep_alive)
 app.router.add_route('*', '/messenger/webhook', messenger_webhook)
 
 if __name__ == "__main__":
-    web.run_app(app, host='0.0.0.0', port=int(os.environ.get('PORT', 3978)))
+    try:
+        port = os.environ.get('PORT')
+        if port is None:
+            logger.warning("PORT env var not set, using default 10000")
+            port = '10000'
+        port = int(port)
+        logger.info(f"Starting server on port {port}")
+        web.run_app(app, host='0.0.0.0', port=port)
+    except ValueError as e:
+        logger.error(f"PORT is not a valid number: {e}")
+    except Exception as e:
+        logger.error(f"Server failed to start: {str(e)}")
