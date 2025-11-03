@@ -11,7 +11,7 @@ import requests
 import json
 from logging_setup import logger
 
-# BẢO ĐẢM init_db được gọi
+# Đảm bảo init_db được gọi
 init_db()
 
 VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN")
@@ -21,18 +21,14 @@ async def keep_alive(request):
     logger.info("Ping from UptimeRobot or test")
     return web.Response(text="Bot alive! No sleep pls~ 😴", status=200)
 
-# THÊM HANDLER CHO ROUTE GỐC / ĐỂ TRÁNH LỖI 404 KHÔNG RÕ RÀNG
 async def root_handler(request):
     logger.info("Root path accessed.")
     return web.Response(text="Bot is running! Use /keep-alive for health check.", status=200)
 
-
 async def messenger_webhook(request):
     logger.info(f"Received request: {request.method} {request.url}")
     
-    # ------------------------------------------------------------------
-    # KHẮC PHỤC LỖI XÁC MINH WEBHOOK (GET) VÀ LỖI 'NOT FOUND' (404)
-    # ------------------------------------------------------------------
+    # Xử lý GET request (Xác minh Webhook)
     if request.method == 'GET':
         verify_token = request.query.get('hub.verify_token')
         challenge = request.query.get('hub.challenge')
@@ -41,9 +37,8 @@ async def messenger_webhook(request):
             return web.Response(text=challenge, status=200)
         logger.warning(f"Invalid verify token received: {verify_token}")
         return web.Response(text='Invalid verify token', status=403)
-    # ------------------------------------------------------------------
     
-    # BẮT ĐẦU PHẦN XỬ LÝ TIN NHẮN (POST)
+    # Xử lý POST request (Nhận tin nhắn)
     if request.method == 'POST':
         data = await request.json()
         logger.info(f"Webhook data: {json.dumps(data)}")
@@ -53,6 +48,12 @@ async def messenger_webhook(request):
                 for messaging in entry.get('messaging', []): 
                     sender_id = messaging['sender']['id']
                     
+                    # KIỂM TRA ĐÂY CÓ PHẢI LÀ ECHO (bot tự gửi) hay không.
+                    # BỎ QUA NGAY để tránh lỗi Messenger API (Lỗi 100)
+                    if 'message' in messaging and messaging['message'].get('is_echo', False):
+                        logger.info(f"Received message_echoes (bot's own message) from {sender_id}. Skipping.")
+                        continue 
+
                     # 1. KIỂM TRA ĐÂY CÓ PHẢI LÀ TIN NHẮN (text message) hay không
                     if 'message' in messaging and 'text' in messaging['message']:
                         query = messaging['message'].get('text', '')
@@ -62,6 +63,7 @@ async def messenger_webhook(request):
                         if await is_rate_limited(sender_id):
                             reply = "Úi, anh spam quá! Chờ xíu nha~ 😅"
                         else:
+                            # Lấy lịch sử theo user_id
                             history = await get_user_history_async(sender_id)
                             messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": query}]
                             reply = await run_gemini_api(messages, os.getenv("MODEL_NAME"), sender_id, temperature=0.7, max_tokens=2000)
@@ -82,7 +84,6 @@ async def messenger_webhook(request):
                                     "Ái chà chà! 🤯 Mất sóng rồi, thử lại nha anh! 😉"
                                 ]
                                 reply = random.choice(friendly_errors)
-                            # Kiểm tra giới hạn 2000 ký tự của Messenger
                             if len(reply) > 2000:
                                 reply = reply[:2000] + "... (cắt bớt nha!)"
                             
@@ -112,7 +113,7 @@ async def messenger_webhook(request):
             return web.Response(text='OK', status=200)
         
 app = web.Application()
-app.router.add_get('/', root_handler) # <-- THÊM ROUTE GỐC (Fix 404)
+app.router.add_get('/', root_handler)
 app.router.add_get('/keep-alive', keep_alive)
 app.router.add_route('*', '/messenger/webhook', messenger_webhook)
 
