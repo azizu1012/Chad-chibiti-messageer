@@ -93,8 +93,6 @@ system_prompt = (
     fr'Sau khi nhận result từ tool, diễn giải bằng giọng e-girl, dùng markdown cho Messenger.'
 )
 
-# (Phần run_gemini_api giữ nguyên như bạn cung cấp)
-
 async def run_gemini_api(messages, model_name, user_id, temperature=0.7, max_tokens=2000):
     keys = GEMINI_API_KEYS
     if not keys:
@@ -102,15 +100,18 @@ async def run_gemini_api(messages, model_name, user_id, temperature=0.7, max_tok
     
     gemini_messages = []
     system_instruction = None
+    # CHUYỂN ĐỔI FORMAT: Từ format custom sang format Gemini API
     for msg in messages:
         if msg["role"] == "system":
             system_instruction = msg["content"]
             continue
            
+        # Dùng 'content' cho tin nhắn thường (text)
         if "content" in msg and isinstance(msg["content"], str):
             role = "model" if msg["role"] == "assistant" else msg["role"]
             gemini_messages.append({"role": role, "parts": [{"text": msg["content"]}]})
        
+        # Dùng 'parts' cho tin nhắn tool call/response
         elif "parts" in msg:
             role = "model" if msg["role"] == "assistant" else msg["role"]
             gemini_messages.append({"role": role, "parts": msg["parts"]})
@@ -139,17 +140,42 @@ async def run_gemini_api(messages, model_name, user_id, temperature=0.7, max_tok
             for part in response.parts:
                 if part.text: # Sử dụng thuộc tính .text để kiểm tra và lấy nội dung
                     reply += part.text
-                elif part.function_call: # Sử dụng thuộc tính .function_call
+                    
+                # PHẦN XỬ LÝ TOOL CALL ĐÃ SỬA ĐỂ CHỐNG LOOP
+                elif part.function_call: 
                     function_call = part.function_call
                     tool_result = await call_tool(function_call, user_id)
-                    # Thêm tool response vào lịch sử và regenerate
-                    gemini_messages.append({"role": "model", "parts": [part]})
-                    gemini_messages.append({"role": "user", "parts": [{"function_response": {"name": function_call.name, "response": tool_result}}]})
-                    return await run_gemini_api(messages, model_name, user_id, temperature, max_tokens)  # Recursive với tool response
+                    
+                    # 1. Tạo bản ghi tool call theo format input
+                    # Part là đối tượng ToolCall, ta cần đóng gói nó vào dictionary như input
+                    tool_call_msg = {"role": "assistant", "parts": [part]}
+                    
+                    # 2. Tạo bản ghi tool response theo format input
+                    tool_response_msg = {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "function_response": {
+                                    "name": function_call.name,
+                                    # tool_result là string (kết quả search), cần truyền nguyên
+                                    "response": tool_result 
+                                }
+                            }
+                        ]
+                    }
+                    
+                    # 3. TẠO LỊCH SỬ MỚI: (lịch sử cũ + tool call + tool response)
+                    # new_messages là history đầy đủ cho lần gọi đệ quy tiếp theo
+                    new_messages = messages + [tool_call_msg, tool_response_msg]
+                    
+                    # 4. GỌI ĐỆ QUY VỚI LỊCH SỬ MỚI ĐÃ CẬP NHẬT
+                    # Lần gọi tiếp theo, model sẽ thấy function_call và function_response
+                    # và có thể áp dụng LUẬT 5 để quyết định có search lại (dùng [FORCE FALLBACK]) hay không.
+                    return await run_gemini_api(new_messages, model_name, user_id, temperature, max_tokens)
             
             return reply
         
         except Exception as e:
             logger.error(f"Key {i+1} lỗi: {e}")
             if i == len(keys) - 1:
-                return f"Lỗi: Tất cả keys thất bại - {str(e)}"
+                return f"Lỗi: Tất cả keys thất bại - {str(e)}. (Vui lòng kiểm tra lại Quota API.)"
