@@ -1,16 +1,17 @@
 import asyncio
-import requests
 import json
 import re
+from asteval import Interpreter
 import os
 from datetime import datetime, timedelta
+from aiohttp import ClientSession # Import ClientSession
 from config import CITY, WEATHER_API_KEY, WEATHER_CACHE_PATH
-from serpapi import GoogleSearch  # SerpAPI (dùng google-search-results package)
-from tavily import TavilyClient  # Tavily
-import exa_py  # Exa.ai (exa-py package)
+from serpapi import GoogleSearch
+from tavily import TavilyClient
+import exa_py
 from google.generativeai.types import Tool, FunctionDeclaration
 from logging_setup import logger
-from config import CITY_NAME_MAP  # <-- Đã di chuyển/thêm vào đây
+from config import CITY_NAME_MAP
 from config import NOTE_PATH
 import aiofiles
 from config import (
@@ -24,6 +25,22 @@ from config import (
     TAVILY_API_KEY,
     EXA_API_KEY,
 )
+
+_aiohttp_session = None # Global aiohttp session for tools
+
+async def get_aiohttp_session():
+    global _aiohttp_session
+    if _aiohttp_session is None:
+        _aiohttp_session = ClientSession()
+    return _aiohttp_session
+
+async def close_aiohttp_session():
+    global _aiohttp_session
+    if _aiohttp_session:
+        await _aiohttp_session.close()
+        _aiohttp_session = None
+        logger.info("aiohttp session for tools closed.")
+
 SEARCH_LOCK = asyncio.Lock()
 SEARCH_API_COUNTER = 0
 
@@ -43,13 +60,13 @@ async def get_weather(city_query=None):
         # Kiểm tra cache
         if os.path.exists(cache_path):
             try:
-                with open(cache_path, 'r') as f:
-                    cache = json.load(f)
+                async with aiofiles.open(cache_path, 'r', encoding='utf-8') as f:
+                    cache = json.loads(await f.read())
                 cache_time = datetime.fromisoformat(cache['timestamp'])
                 if datetime.now() - cache_time < timedelta(hours=1):
                     return {**cache['data'], "city_vi": city_vi}  # Trả cache nếu <1h
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Lỗi đọc cache thời tiết: {e}")
 
         # Gọi API nếu cache cũ hoặc không có
         if not WEATHER_API_KEY:
@@ -59,19 +76,20 @@ async def get_weather(city_query=None):
                 'timestamp': datetime.now().isoformat(),
                 'city_vi': city_vi
             }
-            with open(cache_path, 'w') as f:
-                json.dump({'data': default_data, 'timestamp': datetime.now().isoformat()}, f)
+            async with aiofiles.open(cache_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps({'data': default_data, 'timestamp': datetime.now().isoformat()}))
             return default_data
 
         try:
+            session = await get_aiohttp_session()
             url = f"http://api.weatherapi.com/v1/forecast.json?key={WEATHER_API_KEY}&q={city_en}&days=7&aqi=no&alerts=no"
-            response = requests.get(url, timeout=10)
-            if response.status_code != 200:
-                raise ValueError(f"API status: {response.status_code}")
+            async with session.get(url, timeout=10) as response:
+                if response.status != 200:
+                    raise ValueError(f"API status: {response.status}")
 
-            data = response.json()
-            if 'error' in data:
-                raise ValueError(f"API error: {data['error']['message']}")
+                data = await response.json()
+                if 'error' in data:
+                    raise ValueError(f"API error: {data['error']['message']}")
 
             current = data['current']['condition']['text'] + f" ({data['current']['temp_c']}°C)"
             forecast = []
@@ -86,8 +104,8 @@ async def get_weather(city_query=None):
             }
 
             cache_entry = {'data': weather_data, 'timestamp': datetime.now().isoformat()}
-            with open(cache_path, 'w') as f:
-                json.dump(cache_entry, f, indent=2)
+            async with aiofiles.open(cache_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(cache_entry, f, indent=2))
 
             return weather_data
         except Exception as e:
@@ -98,8 +116,8 @@ async def get_weather(city_query=None):
                 'timestamp': datetime.now().isoformat(),
                 'city_vi': city_vi
             }
-            with open(cache_path, 'w') as f:
-                json.dump({'data': fallback_data, 'timestamp': datetime.now().isoformat()}, f)
+            async with aiofiles.open(cache_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps({'data': fallback_data, 'timestamp': datetime.now().isoformat()}))
             return fallback_data
 
 async def save_note(query):  # Thay def thành async def
@@ -138,12 +156,10 @@ async def run_search_apis(query, mode="general"):
     enriched_queries = []
     for q in sub_queries:
         # Thêm lại logic FORCE_FALLBACK vào query nếu có, để nó được kiểm tra lại ở bước 3
-        q_enhanced = (
-            f"{q} official update release date patch notes roadmap leaks OR speculation"
-        )
+        q_enhanced = q
         if FORCE_FALLBACK_REQUEST:
              # Nếu AI yêu cầu, thêm tag vào enhanced query
-            q_enhanced += " [FORCE FALLBACK]" 
+            q_enhanced += " [FORCE FALLBACK]"
         
         enriched_queries.append(q_enhanced)
 
@@ -246,13 +262,15 @@ async def _search_cse(query, cse_id, api_key, index=0, start_idx=1):
     }
 
     try:
-        response = await asyncio.to_thread(
-            requests.get,
+        session = await get_aiohttp_session()
+        async with session.get(
             "https://www.googleapis.com/customsearch/v1",
             params=params,
             timeout=10,
-        )
-        data = response.json()
+        ) as response:
+            if response.status != 200:
+                raise ValueError(f"API status: {response.status}")
+            data = await response.json()
 
         if "items" not in data:
             logger.warning(f"CSE{index} không có kết quả hợp lệ cho query '{query[:60]}'")
@@ -402,10 +420,10 @@ async def _search_exa(query):
 
 def run_calculator(equation):
     try:
-        # Rất nguy hiểm, chỉ dùng nếu bạn kiểm soát input rất chặt
-        # Giả định có thư viện toán học an toàn ở đây
-        import math
-        return eval(equation, {"__builtins__": None}, math.__dict__)
+        # Sử dụng asteval để thay thế eval() nhằm tăng cường bảo mật
+        aeval = Interpreter()
+        result = aeval.eval(equation)
+        return result
     except Exception as e:
         return f"Calculation error: {str(e)}"
 

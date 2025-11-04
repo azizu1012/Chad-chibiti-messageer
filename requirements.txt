@@ -7,6 +7,5 @@ tavily-python==0.5.0
 exa-py==1.0.15  # Tương thích 2025
 aiohttp==3.10.5  # Dùng cho server Messenger webhook + keep-alive
 aiofiles==24.1.0  # Dùng nếu có file ops (như notes)
-# Bỏ Flask (thay bằng aiohttp), botbuilder-core/schema (không dùng Teams)
-# Giữ discord.py làm reference, nhưng comment ra nếu không dùng
-# discord.py==2.4.0  # Comment ra, chỉ giữ nếu cần Discord sau
+asteval
+aiosqlite

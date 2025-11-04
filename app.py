@@ -4,14 +4,12 @@ import re
 import random
 from datetime import datetime
 from aiohttp import web, ClientSession
-from gemini_api import run_gemini_api, system_prompt
-from database import log_message, get_user_history_async, init_db
+from gemini_api import run_gemini_api, get_system_prompt # system_prompt is now a function
+from database import log_message, get_user_history_async, init_db, close_db_connection
 from anti_spam import is_rate_limited
 import json
 from logging_setup import logger
-
-# Đảm bảo init_db được gọi
-init_db()
+from tools import close_aiohttp_session # Import the new close_aiohttp_session
 
 VERIFY_TOKEN = os.getenv("MESSENGER_VERIFY_TOKEN")
 PAGE_ACCESS_TOKEN = os.getenv("MESSENGER_PAGE_ACCESS_TOKEN")
@@ -31,7 +29,7 @@ async def process_message_async(request, sender_id, query):
             reply = "Úi, anh spam quá! Chờ xíu nha~ 😅"
             # Gửi tin nhắn rate limit và kết thúc sớm
             async with request.app['http_session'].post(
-                "https://graph.facebook.com/v20.0/me/messages",
+                "https://graph.facebook.com/v24.0/me/messages",
                 params={'access_token': PAGE_ACCESS_TOKEN},
                 json={'recipient': {'id': sender_id}, 'message': {'text': reply}}
             ) as response:
@@ -44,7 +42,7 @@ async def process_message_async(request, sender_id, query):
 
         # Lấy lịch sử và gọi API
         history = await get_user_history_async(sender_id)
-        messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": query}]
+        messages = [{"role": "system", "content": get_system_prompt()}] + history + [{"role": "user", "content": query}]
         reply = await run_gemini_api(messages, os.getenv("MODEL_NAME"), sender_id, temperature=0.7, max_tokens=2000)
 
         # Xử lý thinking block
@@ -74,7 +72,7 @@ async def process_message_async(request, sender_id, query):
 
         # Gửi trả lời cho người dùng
         async with request.app['http_session'].post(
-            "https://graph.facebook.com/v20.0/me/messages",
+            "https://graph.facebook.com/v24.0/me/messages",
             params={'access_token': PAGE_ACCESS_TOKEN},
             json={'recipient': {'id': sender_id}, 'message': {'text': reply}}
         ) as response:
@@ -89,7 +87,7 @@ async def process_message_async(request, sender_id, query):
         try:
             # Cố gắng gửi tin nhắn lỗi cho người dùng
             async with request.app['http_session'].post(
-                "https://graph.facebook.com/v20.0/me/messages",
+                "https://graph.facebook.com/v24.0/me/messages",
                 params={'access_token': PAGE_ACCESS_TOKEN},
                 json={'recipient': {'id': sender_id}, 'message': {'text': "Ối, tui gặp lỗi rồi, bạn thử lại sau nhé!"}}
             ) as response:
@@ -166,23 +164,29 @@ async def create_app():
     app.router.add_get('/keep-alive', keep_alive)
     app.router.add_route('*', '/messenger/webhook', messenger_webhook)
     
-    # Đảm bảo session được đóng khi ứng dụng tắt
+    # Đảm bảo session và DB connection được đóng khi ứng dụng tắt
     async def on_shutdown(app_instance):
         await app_instance['http_session'].close()
+        await close_db_connection()
+        await close_aiohttp_session() # Close the aiohttp session from tools.py
     app.on_shutdown.append(on_shutdown)
     
     return app
 
+async def main():
+    await init_db() # Khởi tạo DB bất đồng bộ
+    app = await create_app()
+    port = os.environ.get('PORT')
+    if port is None:
+        logger.warning("PORT env var not set, using default 10000")
+        port = '10000'
+    port = int(port)
+    logger.info(f"Starting server on port {port}")
+    web.run_app(app, host='0.0.0.0', port=port)
+
 if __name__ == "__main__":
     try:
-        port = os.environ.get('PORT')
-        if port is None:
-            logger.warning("PORT env var not set, using default 10000")
-            port = '10000'
-        port = int(port)
-        logger.info(f"Starting server on port {port}")
-        app = asyncio.run(create_app())
-        web.run_app(app, host='0.0.0.0', port=port)
+        asyncio.run(main())
     except ValueError as e:
         logger.error(f"PORT is not a valid number: {e}")
     except Exception as e:
