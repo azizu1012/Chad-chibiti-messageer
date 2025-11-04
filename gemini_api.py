@@ -147,7 +147,6 @@ async def run_gemini_api(messages, model_name, user_id, temperature=0.7, max_tok
                     tool_result = await call_tool(function_call, user_id)
                     
                     # 1. Tạo bản ghi tool call theo format input
-                    # Part là đối tượng ToolCall, ta cần đóng gói nó vào dictionary như input
                     tool_call_msg = {"role": "assistant", "parts": [part]}
                     
                     # 2. Tạo bản ghi tool response theo format input
@@ -157,20 +156,23 @@ async def run_gemini_api(messages, model_name, user_id, temperature=0.7, max_tok
                             {
                                 "function_response": {
                                     "name": function_call.name,
-                                    # tool_result là string (kết quả search), cần truyền nguyên
-                                    "response": tool_result 
+                                    
+                                    # --------------------------------------------------
+                                    # ĐÂY LÀ SỬA LỖI: 'str' object has no attribute 'items'
+                                    # --------------------------------------------------
+                                    # API Gemini BẮT BUỘC 'response' phải là một DICT (JSON object),
+                                    # không phải là một STRING.
+                                    # Ta bọc 'tool_result' (là string) vào trong một dict.
+                                    "response": {"content": tool_result}
                                 }
                             }
                         ]
                     }
                     
                     # 3. TẠO LỊCH SỬ MỚI: (lịch sử cũ + tool call + tool response)
-                    # new_messages là history đầy đủ cho lần gọi đệ quy tiếp theo
                     new_messages = messages + [tool_call_msg, tool_response_msg]
                     
                     # 4. GỌI ĐỆ QUY VỚI LỊCH SỬ MỚI ĐÃ CẬP NHẬT
-                    # Lần gọi tiếp theo, model sẽ thấy function_call và function_response
-                    # và có thể áp dụng LUẬT 5 để quyết định có search lại (dùng [FORCE FALLBACK]) hay không.
                     return await run_gemini_api(new_messages, model_name, user_id, temperature, max_tokens)
             
             return reply
