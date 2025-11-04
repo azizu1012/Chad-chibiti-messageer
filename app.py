@@ -174,19 +174,26 @@ async def create_app():
     return app
 
 async def main():
-    await init_db() # Khởi tạo DB bất đồng bộ
     app = await create_app()
+    
+    async def start_db(app_instance):
+        await init_db() # Khởi tạo DB bất đồng bộ
+    app.on_startup.append(start_db)
+
+    return app
+
+if __name__ == "__main__":
     port = os.environ.get('PORT')
     if port is None:
         logger.warning("PORT env var not set, using default 10000")
         port = '10000'
     port = int(port)
     logger.info(f"Starting server on port {port}")
-    web.run_app(app, host='0.0.0.0', port=port)
-
-if __name__ == "__main__":
+    
     try:
-        asyncio.run(main())
+        # Pass the async main function directly to web.run_app
+        # aiohttp.web.run_app will manage the event loop
+        web.run_app(main(), host='0.0.0.0', port=port)
     except ValueError as e:
         logger.error(f"PORT is not a valid number: {e}")
     except Exception as e:
